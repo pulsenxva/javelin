@@ -1,0 +1,6 @@
+build/
+wm
+*.o
+*.out
+core
+*.core
