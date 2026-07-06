@@ -1,8 +1,29 @@
 #include <cassert>
 #include <iostream>
+#include <vector>
 #include <xcb/xcb.h>
 #include <xcb/xcb_event.h>
 #include <xcb/xcb_util.h>
+#include <xcb/xproto.h>
+
+struct Client {
+  xcb_window_t window;
+  int x, y, w, h;
+};
+
+void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Client> &clients) {
+  if(clients.empty()) return;
+  Client &c = clients.back();
+  
+  // fullscreen
+  c.x = 0, c.y = 0;
+  c.h = screen->height_in_pixels;
+  c.w = screen->width_in_pixels;
+
+  int vals[4] = {c.x, c.y, c.w, c.h};
+  int mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
+  xcb_configure_window(connection, c.window, mask, vals);
+}
 
 int main() {
   int screen_number;
@@ -24,6 +45,8 @@ int main() {
 
   xcb_flush(connection);
 
+  std::vector<Client> clients;
+
   xcb_generic_event_t *generic_event;
   while(is_running) {
     generic_event = xcb_wait_for_event(connection);
@@ -34,6 +57,21 @@ int main() {
       break;
     }
     switch(XCB_EVENT_RESPONSE_TYPE(generic_event)) {
+      case XCB_MAP_REQUEST: {
+        xcb_map_request_event_t *e = (xcb_map_request_event_t*)  generic_event;
+        
+        Client c;
+        c.window = e->window;
+
+        clients.push_back(c);
+
+        arrange(connection, screen, clients);
+        xcb_map_window(connection, e->window);
+        xcb_flush(connection);
+
+        break;
+      }
+        
     }
     free(generic_event);
   }
