@@ -1,27 +1,42 @@
-#include <xcb/xcb.h>
 #include <cassert>
+#include <iostream>
+#include <xcb/xcb.h>
+#include <xcb/xcb_event.h>
 #include <xcb/xcb_util.h>
-#include <xcb/xproto.h>
 
 int main() {
   int screen_number;
-  xcb_connection_t *connection = xcb_connect(NULL, &screen_number);
-  assert(xcb_connection_has_error(connection));
+  bool is_running = true;
 
+  xcb_connection_t *connection = xcb_connect(NULL, &screen_number);
+  assert(!xcb_connection_has_error(connection));
   xcb_screen_t *screen = xcb_aux_get_screen(connection, screen_number);
 
-  xcb_window_t window = xcb_generate_id(connection);
-  xcb_create_window(connection, screen->root_depth, window, screen->root, 0, 0, 720, 400, 0, 
-      XCB_WINDOW_CLASS_INPUT_OUTPUT, screen->root_visual, XCB_EVENT_MASK_NO_EVENT, NULL);
-  
-  xcb_map_window(connection, window);
-  assert(xcb_flush(connection));
+  uint32_t mask = XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
+  xcb_void_cookie_t cookie = xcb_change_window_attributes_checked(
+      connection, screen->root, XCB_CW_EVENT_MASK, &mask);
+  xcb_generic_error_t *error = xcb_request_check(connection, cookie);
+  if(error) {
+    std::cerr << "Another WM is already running\n";
+    free(error);
+    return 1;
+  }
 
-  //const char *title = "QWE";
-  //xcb_change_property(connection, XCB_PROP_MODE_REPLACE, window, XCB_ATOM_WM_NAME, XCB_ATOM_STRING, 8, 8, title);
+  xcb_flush(connection);
 
-  while(1);
-
+  xcb_generic_event_t *generic_event;
+  while(is_running) {
+    generic_event = xcb_wait_for_event(connection);
+    if(!generic_event) {
+      if(xcb_connection_has_error(connection)) {
+        std::cout << "Connection to X server lost\n";
+      }
+      break;
+    }
+    switch(XCB_EVENT_RESPONSE_TYPE(generic_event)) {
+    }
+    free(generic_event);
+  }
   xcb_disconnect(connection);
   return 0;
 }

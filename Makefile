@@ -1,6 +1,6 @@
 CXX      := g++
 CXXFLAGS := -std=c++20 -Wall -Wextra -g
-LDFLAGS  := -lxcb -lxcb-util -lxcb-keysyms
+LDFLAGS  := -lxcb -lxcb-util -lxcb-keysyms -lxcb-icccm
 
 TARGET   := wm
 

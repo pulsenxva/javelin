@@ -1,1 +1,1 @@
-# Javelin is a simple X window manager
+## Javelin is a simple X window manager
