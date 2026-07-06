@@ -13,16 +13,44 @@ struct Client {
 
 void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Client> &clients) {
   if(clients.empty()) return;
-  Client &c = clients.back();
   
-  // fullscreen
-  c.x = 0, c.y = 0;
-  c.h = screen->height_in_pixels;
-  c.w = screen->width_in_pixels;
+  if((int)clients.size() == 1) {
+    Client &c = clients.back();
+    // fullscreen
+    c.x = 0, c.y = 0;
+    c.h = screen->height_in_pixels;
+    c.w = screen->width_in_pixels;
 
-  int vals[4] = {c.x, c.y, c.w, c.h};
-  int mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
-  xcb_configure_window(connection, c.window, mask, vals);
+    int vals[4] = {c.x, c.y, c.w, c.h};
+    int mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
+    xcb_configure_window(connection, c.window, mask, vals);
+  } else {
+    Client& master = clients[0];
+    master.x = 0;
+    master.y = 0;
+    master.w = screen->width_in_pixels/2;
+    master.h = screen->height_in_pixels;
+    int mvals[4] = {master.x, master.y, master.w, master.h};
+    int mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
+    xcb_configure_window(connection, master.window, mask, mvals);
+
+    std::vector<Client> ri;
+    for(int i = 1; i < (int)clients.size(); i++) {
+      ri.push_back(clients[i]);
+    }
+    int common_height = screen->height_in_pixels/(int)ri.size();
+    int cur_y = 0;
+    for(auto& c: ri) {
+      c.x = screen->width_in_pixels/2+1;
+      c.w = screen->width_in_pixels/2;
+      c.y = cur_y;
+      c.h = common_height;
+      cur_y += common_height+1;
+      int vals[4] = {c.x, c.y, c.w, c.h};
+      int mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
+      xcb_configure_window(connection, c.window, mask, vals);
+    }
+  }
 }
 
 int main() {
