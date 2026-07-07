@@ -243,6 +243,7 @@ int main() {
 
   }
 
+
   xcb_disconnect(connection);
   return 0;
 }
