@@ -2,6 +2,9 @@
 #include <cstdint>
 #include <iostream>
 #include <vector>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <csignal>
 
 #include <xcb/xcb.h>
 #include <xcb/xcb_event.h>
@@ -56,6 +59,14 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
   }
 }
 
+void spawn(const char* cmd) {
+  if(fork() == 0) {
+    setsid();
+    execlp(cmd, cmd, NULL);
+    _exit(1);
+  }
+}
+
 void close_window(xcb_connection_t *connection, xcb_window_t window,
                    xcb_atom_t wm_protocols, xcb_atom_t wm_delete_window) {
   xcb_client_message_event_t event = {};
@@ -94,6 +105,8 @@ int main() {
   assert(!xcb_connection_has_error(connection));
   xcb_screen_t *screen = xcb_aux_get_screen(connection, screen_number);
 
+  signal(SIGCHLD, SIG_IGN);
+
   xcb_atom_t wm_protocols;
   xcb_atom_t wm_delete_window;
   xcb_intern_atom_cookie_t c1 = xcb_intern_atom(connection, 0, 12, "WM_PROTOCOLS");
@@ -116,11 +129,22 @@ int main() {
   }
 
   xcb_key_symbols_t *keysyms = xcb_key_symbols_alloc(connection);
-  xcb_keycode_t *keycode = xcb_key_symbols_get_keycode(keysyms, XK_Q);
 
+  xcb_keycode_t *keycode_q = xcb_key_symbols_get_keycode(keysyms, XK_Q);
   xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4 | XCB_MOD_MASK_SHIFT,
-      *keycode, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-  free(keycode);
+      *keycode_q, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+  free(keycode_q);
+
+  xcb_keycode_t *keycode_return = xcb_key_symbols_get_keycode(keysyms, XK_Return);
+  xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4,
+      *keycode_return, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+  free(keycode_return);
+
+  xcb_keycode_t *keycode_y = xcb_key_symbols_get_keycode(keysyms, XK_Y);
+  xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4,
+      *keycode_return, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+  free(keycode_y);
+
   xcb_key_symbols_free(keysyms);
   xcb_flush(connection);
 
@@ -139,7 +163,6 @@ int main() {
 
     switch(XCB_EVENT_RESPONSE_TYPE(generic_event)) {
       
-      // add a window ( DISPLAY=:2 xterm & )
       case XCB_MAP_REQUEST: {
         xcb_map_request_event_t *e = (xcb_map_request_event_t*)  generic_event;
 
@@ -166,9 +189,20 @@ int main() {
       // press Mod+Shift+Q to delete focused window
       case XCB_KEY_PRESS: {
         xcb_key_press_event_t *e = (xcb_key_press_event_t*) generic_event;
-        if(!clients.empty()) {
+        
+        xcb_key_symbols_t *ks = xcb_key_symbols_alloc(connection);
+        xcb_keysym_t sym = xcb_key_symbols_get_keysym(ks, e->detail, 0);
+        xcb_key_symbols_free(ks);
+        
+        if(sym == XK_q && (e->state & XCB_MOD_MASK_SHIFT) && focused_window !=  XCB_NONE) {
           close_window(connection, focused_window, wm_protocols, wm_delete_window);
         }
+        else if(sym == XK_Return) {
+          spawn("xterm");
+        } else if(sym == XK_y) {
+          is_running = false;
+        }
+
         break;
       }
 
