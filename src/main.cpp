@@ -70,6 +70,22 @@ void close_window(xcb_connection_t *connection, xcb_window_t window,
   xcb_flush(connection);
 }
 
+void focus_window(xcb_connection_t *connection, xcb_window_t &focused_window, xcb_window_t& window) {
+  if(focused_window == window) return;
+  if(focused_window != XCB_NONE) {
+    int unfocused_col = 0x444444;
+    xcb_change_window_attributes(connection, focused_window, XCB_CW_BORDER_PIXEL, &unfocused_col);
+  }
+
+  xcb_set_input_focus(connection, XCB_INPUT_FOCUS_POINTER_ROOT, window, XCB_CURRENT_TIME);
+
+  int focused_col = 0xff0000;
+  xcb_change_window_attributes(connection, window, XCB_CW_BORDER_PIXEL, &focused_col);
+
+  focused_window = window;
+  xcb_flush(connection);
+}
+
 int main() {
   int screen_number;
   bool is_running = true;
@@ -108,9 +124,8 @@ int main() {
   xcb_key_symbols_free(keysyms);
   xcb_flush(connection);
 
-  xcb_flush(connection);
-
   std::vector<Client> clients;
+  xcb_window_t focused_window = XCB_NONE;
 
   xcb_generic_event_t *generic_event;
   while(is_running) {
@@ -121,14 +136,25 @@ int main() {
       }
       break;
     }
+
     switch(XCB_EVENT_RESPONSE_TYPE(generic_event)) {
+      
+      // add a window ( DISPLAY=:2 xterm & )
       case XCB_MAP_REQUEST: {
         xcb_map_request_event_t *e = (xcb_map_request_event_t*)  generic_event;
+
+        uint32_t enter_mask = XCB_EVENT_MASK_ENTER_WINDOW;
+        xcb_change_window_attributes(connection, e->window, XCB_CW_EVENT_MASK, &enter_mask);
         
         Client c;
         c.window = e->window;
 
         clients.push_back(c);
+
+        int border_w = 2;
+        xcb_configure_window(connection, e->window, XCB_CONFIG_WINDOW_BORDER_WIDTH, &border_w);
+
+        focus_window(connection, focused_window, e->window);
 
         arrange(connection, screen, clients);
         xcb_map_window(connection, e->window);
@@ -136,13 +162,17 @@ int main() {
 
         break;
       }
+
+      // press Mod+Shift+Q to delete focused window
       case XCB_KEY_PRESS: {
         xcb_key_press_event_t *e = (xcb_key_press_event_t*) generic_event;
         if(!clients.empty()) {
-          close_window(connection, clients.back().window, wm_protocols, wm_delete_window);
+          close_window(connection, focused_window, wm_protocols, wm_delete_window);
         }
         break;
       }
+
+      // delete a window
       case XCB_UNMAP_NOTIFY: {
         xcb_unmap_notify_event_t *e = (xcb_unmap_notify_event_t*) generic_event;
         int delete_idx = -1;
@@ -154,14 +184,31 @@ int main() {
         }
         if(delete_idx != -1) {
           clients.erase(clients.begin()+delete_idx);
+
+          if(delete_idx < (int)clients.size()) {
+            focus_window(connection, focused_window, clients[delete_idx].window);
+          } else if(!clients.empty()) {
+            focus_window(connection, focused_window, clients.back().window);
+          } else {
+            focused_window = XCB_NONE;
+          }
+
           arrange(connection, screen, clients);
           xcb_flush(connection);
         }
         break;
       }
+
+      // focus window
+      case XCB_ENTER_NOTIFY: {
+        xcb_enter_notify_event_t *e = (xcb_enter_notify_event_t*) generic_event;
+        focus_window(connection, focused_window, e->event);
+        break;
+      }
     }
-    free(generic_event);
+
   }
+
   xcb_disconnect(connection);
   return 0;
 }
