@@ -2,7 +2,6 @@
 #include <cstdint>
 #include <iostream>
 #include <vector>
-#include <set>
 #include <unistd.h>
 #include <sys/wait.h>
 #include <csignal>
@@ -20,14 +19,12 @@ struct Client {
   int tag;
 };
 
-void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Client> &clients, int &current_workspace) {
-  std::vector<Client> cur_clients;
-  for(auto c: clients) if(c.tag == current_workspace) cur_clients.push_back(c);
-  if(cur_clients.empty()) return;
+// TODO workspace
+void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Client> &clients) {
+  if(clients.empty()) return;
   
-  if((int)cur_clients.size() == 1) {
-    if(cur_clients.empty()) return;
-    Client &c = cur_clients.back();
+  if((int)clients.size() == 1) {
+    Client &c = clients.back();
     c.x = 0, c.y = 0;
     c.h = screen->height_in_pixels;
     c.w = screen->width_in_pixels;
@@ -36,7 +33,7 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
     int mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
     xcb_configure_window(connection, c.window, mask, vals);
   } else {
-    Client& master = cur_clients[0];
+    Client& master = clients[0];
     master.x = 0;
     master.y = 0;
     master.w = screen->width_in_pixels/2;
@@ -46,7 +43,9 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
     xcb_configure_window(connection, master.window, mask, mvals);
 
     std::vector<Client> ri;
-    for(int i = 1; i < (int)cur_clients.size(); i++) ri.push_back(cur_clients[i]);
+    for(int i = 1; i < (int)clients.size(); i++) {
+      ri.push_back(clients[i]);
+    }
     int common_height = screen->height_in_pixels/(int)ri.size();
     int cur_y = 0;
     for(auto& c: ri) {
@@ -100,18 +99,9 @@ void focus_window(xcb_connection_t *connection, xcb_window_t &focused_window, xc
   xcb_flush(connection);
 }
 
-void switch_workspace(xcb_connection_t *connection, std::vector<Client>&clients, 
-    int &current_workspace, int workspace, std::set<xcb_window_t> &unmaps) {
+void switch_window(xcb_connection_t *connection, int &current_workspace, int &workspace) {
   if(current_workspace == workspace) return;
-  for(auto c: clients) {
-    if(c.tag == current_workspace) {
-      unmaps.insert(c.window);
-      xcb_unmap_window(connection, c.window);
-    }
-    else if(c.tag == workspace) xcb_map_window(connection, c.window);
-  }
-  current_workspace = workspace;
-  xcb_flush(connection);
+  
 }
 
 int main() {
@@ -167,20 +157,12 @@ int main() {
       *keycode_d, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
   free(keycode_d);
 
-  for(int i = 1; i <= 9; i++) {
-    xcb_keycode_t *kc = xcb_key_symbols_get_keycode(keysyms, XK_1 + i - 1);
-    xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4, *kc,
-        XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
-    free(kc);
-  }
-
   xcb_key_symbols_free(keysyms);
   xcb_flush(connection);
 
   std::vector<Client> clients;
   xcb_window_t focused_window = XCB_NONE;
   int current_workspace = 1;
-  std::set<xcb_window_t> unmaps;
 
   xcb_generic_event_t *generic_event;
   while(is_running) {
@@ -209,11 +191,11 @@ int main() {
         int border_w = 2;
         xcb_configure_window(connection, e->window, XCB_CONFIG_WINDOW_BORDER_WIDTH, &border_w);
 
-        arrange(connection, screen, clients, current_workspace);
+        focus_window(connection, focused_window, e->window);
+
+        arrange(connection, screen, clients);
         xcb_map_window(connection, e->window);
         xcb_flush(connection);
-
-        focus_window(connection, focused_window, e->window);
 
         break;
       }
@@ -238,10 +220,6 @@ int main() {
         else if(sym == XK_d) {
           spawn("dmenu_run");
         }
-        else if(sym  >= XK_1 && sym <= XK_9 && !(e->state &XCB_MOD_MASK_SHIFT)) {
-          switch_workspace(connection, clients, current_workspace, (int)sym-XK_1+1, unmaps);
-          arrange(connection, screen, clients, current_workspace);
-        }
 
         break;
       }
@@ -249,12 +227,6 @@ int main() {
       // delete a window
       case XCB_UNMAP_NOTIFY: {
         xcb_unmap_notify_event_t *e = (xcb_unmap_notify_event_t*) generic_event;
-
-        if(unmaps.find(e->window) != unmaps.end()) {
-          unmaps.erase(unmaps.find(e->window));
-          break;
-        }
-
         int delete_idx = -1;
         for(int i = 0; i < (int)clients.size(); i++) {
           if(clients[i].window == e->window) {
@@ -273,7 +245,7 @@ int main() {
             focused_window = XCB_NONE;
           }
 
-          arrange(connection, screen, clients, current_workspace);
+          arrange(connection, screen, clients);
           xcb_flush(connection);
         }
         break;
@@ -288,6 +260,7 @@ int main() {
     }
 
   }
+
 
   xcb_disconnect(connection);
   return 0;
