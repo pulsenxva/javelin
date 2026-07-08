@@ -14,6 +14,9 @@
 #include <xcb/xcb_keysyms.h>
 #include <X11/keysym.h>
 
+const int GAP = 2;
+const int BORDER = 2;
+
 struct Client {
   xcb_window_t window;
   int x, y, w, h;
@@ -28,38 +31,43 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
   if((int)cur_clients.size() == 1) {
     if(cur_clients.empty()) return;
     Client &c = cur_clients.back();
+
     c.x = 0, c.y = 0;
-    c.h = screen->height_in_pixels;
-    c.w = screen->width_in_pixels;
+    c.h = screen->height_in_pixels-2*BORDER;
+    c.w = screen->width_in_pixels-2*BORDER;
 
     int vals[4] = {c.x, c.y, c.w, c.h};
     int mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
     xcb_configure_window(connection, c.window, mask, vals);
   } else {
     Client& master = cur_clients[0];
+
     master.x = 0;
     master.y = 0;
-    master.w = screen->width_in_pixels/2;
-    master.h = screen->height_in_pixels;
+    master.w = screen->width_in_pixels/2 - BORDER;
+    master.h = screen->height_in_pixels - 2*BORDER;
+
     int mvals[4] = {master.x, master.y, master.w, master.h};
     int mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
     xcb_configure_window(connection, master.window, mask, mvals);
 
     std::vector<Client> ri;
     for(int i = 1; i < (int)cur_clients.size(); i++) ri.push_back(cur_clients[i]);
-    int common_height = screen->height_in_pixels/(int)ri.size();
+    //int common_height = (screen->height_in_pixels - GAP*((int)ri.size()+1) - 2*BORDER*((int)ri.size()))/(int)ri.size();
+    int common_height = (screen->height_in_pixels - 2*BORDER*(int)ri.size())/(int)ri.size();
     int cur_y = 0;
     for(auto& c: ri) {
-      c.x = screen->width_in_pixels/2+1;
-      c.w = screen->width_in_pixels/2;
+      c.x = screen->width_in_pixels/2 + BORDER;
+      c.w = master.w - 2*BORDER;
       c.y = cur_y;
       c.h = common_height;
-      cur_y += common_height+1;
+      cur_y += common_height+2*BORDER;
       int vals[4] = {c.x, c.y, c.w, c.h};
       int mask = XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y | XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT;
       xcb_configure_window(connection, c.window, mask, vals);
     }
   }
+  xcb_flush(connection);
 }
 
 void spawn(const char* cmd) {
@@ -93,7 +101,7 @@ void focus_window(xcb_connection_t *connection, xcb_window_t &focused_window, xc
 
   xcb_set_input_focus(connection, XCB_INPUT_FOCUS_POINTER_ROOT, window, XCB_CURRENT_TIME);
 
-  int focused_col = 0xff0000;
+  int focused_col = 0x3370E8;
   xcb_change_window_attributes(connection, window, XCB_CW_BORDER_PIXEL, &focused_col);
 
   focused_window = window;
@@ -206,8 +214,7 @@ int main() {
 
         clients.push_back(c);
 
-        int border_w = 2;
-        xcb_configure_window(connection, e->window, XCB_CONFIG_WINDOW_BORDER_WIDTH, &border_w);
+        xcb_configure_window(connection, e->window, XCB_CONFIG_WINDOW_BORDER_WIDTH, &BORDER);
 
         arrange(connection, screen, clients, current_workspace);
         xcb_map_window(connection, e->window);
@@ -230,7 +237,7 @@ int main() {
           close_window(connection, focused_window, wm_protocols, wm_delete_window);
         }
         else if(sym == XK_Return) {
-          spawn("alacritty");
+          spawn("xterm");
         }
         else if(sym == XK_y) {
           is_running = false;
@@ -265,12 +272,14 @@ int main() {
         if(delete_idx != -1) {
           clients.erase(clients.begin()+delete_idx);
 
-          if(delete_idx < (int)clients.size()) {
-            focus_window(connection, focused_window, clients[delete_idx].window);
-          } else if(!clients.empty()) {
-            focus_window(connection, focused_window, clients.back().window);
-          } else {
+          if(focused_window == e->window) {
             focused_window = XCB_NONE;
+            xcb_window_t foc_w = XCB_NONE;
+            for(auto& c: clients) if(c.tag == current_workspace) {
+              foc_w = c.window;
+              break;
+            }
+            focus_window(connection, focused_window, foc_w);
           }
 
           arrange(connection, screen, clients, current_workspace);
