@@ -122,6 +122,15 @@ void switch_workspace(xcb_connection_t *connection, std::vector<Client>&clients,
   xcb_flush(connection);
 }
 
+void move_to_workspace(xcb_connection_t *connection, Client &c, 
+    int workspace, std::set<xcb_window_t>&unmaps) {
+  if(workspace == c.tag) return;
+
+  unmaps.insert(c.window);
+  xcb_unmap_window(connection, c.window);
+  c.tag = workspace;
+}
+
 int main() {
   int screen_number;
   bool is_running = true;
@@ -178,6 +187,8 @@ int main() {
   for(int i = 1; i <= 9; i++) {
     xcb_keycode_t *kc = xcb_key_symbols_get_keycode(keysyms, XK_1 + i - 1);
     xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4, *kc,
+        XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+    xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4 | XCB_MOD_MASK_SHIFT, *kc,
         XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
     free(kc);
   }
@@ -237,7 +248,7 @@ int main() {
           close_window(connection, focused_window, wm_protocols, wm_delete_window);
         }
         else if(sym == XK_Return) {
-          spawn("xterm");
+          spawn("alacritty");
         }
         else if(sym == XK_y) {
           is_running = false;
@@ -247,6 +258,14 @@ int main() {
         }
         else if(sym  >= XK_1 && sym <= XK_9 && !(e->state &XCB_MOD_MASK_SHIFT)) {
           switch_workspace(connection, clients, current_workspace, (int)sym-XK_1+1, unmaps);
+          arrange(connection, screen, clients, current_workspace);
+        } 
+        else if(sym >= XK_1 && sym <= XK_9 && (e->state & XCB_MOD_MASK_SHIFT)) {
+          for(auto &c: clients) if(c.window == focused_window) {
+            move_to_workspace(connection, c, sym-XK_1+1, unmaps);
+            switch_workspace(connection, clients, current_workspace, (int)sym-XK_1+1, unmaps);
+            break;
+          }
           arrange(connection, screen, clients, current_workspace);
         }
 
