@@ -13,6 +13,7 @@
 #include <xcb/xproto.h>
 #include <xcb/xcb_keysyms.h>
 #include <X11/keysym.h>
+#include <X11/XF86keysym.h>
 
 const int GAP = 2;
 const int BORDER = 2;
@@ -74,6 +75,14 @@ void spawn(const char* cmd) {
   if(fork() == 0) {
     setsid();
     execlp(cmd, cmd, NULL);
+    _exit(1);
+  }
+}
+
+void spawn_args(const char *file, char *const argv[]) {
+  if(fork() == 0) {
+    setsid();
+    execvp(file, argv);
     _exit(1);
   }
 }
@@ -193,6 +202,21 @@ int main() {
     free(kc);
   }
 
+  xcb_keycode_t *kc_vol_up = xcb_key_symbols_get_keycode(keysyms, XF86XK_AudioRaiseVolume);
+  xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_ANY, *kc_vol_up,
+      XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+  free(kc_vol_up);
+
+  xcb_keycode_t *kc_vol_down = xcb_key_symbols_get_keycode(keysyms, XF86XK_AudioLowerVolume);
+  xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_ANY, *kc_vol_down,
+      XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+  free(kc_vol_down);
+
+  xcb_keycode_t *kc_mute = xcb_key_symbols_get_keycode(keysyms, XF86XK_AudioMute);
+  xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_ANY, *kc_mute,
+      XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+  free(kc_mute);
+
   xcb_key_symbols_free(keysyms);
   xcb_flush(connection);
 
@@ -267,6 +291,18 @@ int main() {
             break;
           }
           arrange(connection, screen, clients, current_workspace);
+        }
+        else if(sym == XF86XK_AudioRaiseVolume) {
+          char *argv[] = {(char*)"pactl", (char*)"set-sink-volume", (char*)"@DEFAULT_SINK@", (char*)"+5%", NULL};
+          spawn_args("pactl", argv);
+        }
+        else if(sym == XF86XK_AudioLowerVolume) {
+          char *argv[] = {(char*)"pactl", (char*)"set-sink-volume", (char*)"@DEFAULT_SINK@", (char*)"-5%", NULL};
+          spawn_args("pactl", argv);
+        }
+        else if(sym == XF86XK_AudioMute) {
+          char *argv[] = {(char*)"pactl", (char*)"set-sink-mute", (char*)"@DEFAULT_SINK@", (char*)"toggle", NULL};
+          spawn_args("pactl", argv);
         }
 
         break;
