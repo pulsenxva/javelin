@@ -15,8 +15,8 @@
 #include <X11/keysym.h>
 #include <X11/XF86keysym.h>
 
-const int GAP = 2;
 const int BORDER = 2;
+int diff_percent = 0;
 
 struct Client {
   xcb_window_t window;
@@ -43,9 +43,11 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
   } else {
     Client& master = cur_clients[0];
 
+    int dif = diff_percent*screen->width_in_pixels/100;
+
     master.x = 0;
     master.y = 0;
-    master.w = screen->width_in_pixels/2 - BORDER;
+    master.w = screen->width_in_pixels/2 - BORDER + dif;
     master.h = screen->height_in_pixels - 2*BORDER;
 
     int mvals[4] = {master.x, master.y, master.w, master.h};
@@ -54,12 +56,14 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
 
     std::vector<Client> ri;
     for(int i = 1; i < (int)cur_clients.size(); i++) ri.push_back(cur_clients[i]);
-    //int common_height = (screen->height_in_pixels - GAP*((int)ri.size()+1) - 2*BORDER*((int)ri.size()))/(int)ri.size();
     int common_height = (screen->height_in_pixels - 2*BORDER*(int)ri.size())/(int)ri.size();
     int cur_y = 0;
     for(auto& c: ri) {
-      c.x = screen->width_in_pixels/2 + BORDER;
-      c.w = master.w - 2*BORDER;
+      c.x = master.w + BORDER;
+      c.w = screen->width_in_pixels - master.w - 2*BORDER;
+
+      //c.x = screen->width_in_pixels/2 + BORDER;
+      //c.w = master.w - 2*BORDER;
       c.y = cur_y;
       c.h = common_height;
       cur_y += common_height+2*BORDER;
@@ -193,6 +197,16 @@ int main() {
       *keycode_d, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
   free(keycode_d);
 
+  xcb_keycode_t *keycode_h = xcb_key_symbols_get_keycode(keysyms, XK_H);
+  xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4,
+      *keycode_h, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+  free(keycode_h);
+
+  xcb_keycode_t *keycode_l = xcb_key_symbols_get_keycode(keysyms, XK_L);
+  xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4,
+      *keycode_l, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+  free(keycode_l);
+
   for(int i = 1; i <= 9; i++) {
     xcb_keycode_t *kc = xcb_key_symbols_get_keycode(keysyms, XK_1 + i - 1);
     xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4, *kc,
@@ -260,7 +274,6 @@ int main() {
         break;
       }
 
-      // press Mod+Shift+Q to delete focused window
       case XCB_KEY_PRESS: {
         xcb_key_press_event_t *e = (xcb_key_press_event_t*) generic_event;
         
@@ -272,7 +285,7 @@ int main() {
           close_window(connection, focused_window, wm_protocols, wm_delete_window);
         }
         else if(sym == XK_Return) {
-          spawn("alacritty");
+          spawn("xterm");
         }
         else if(sym == XK_y) {
           is_running = false;
@@ -290,6 +303,27 @@ int main() {
             switch_workspace(connection, clients, current_workspace, (int)sym-XK_1+1, unmaps);
             break;
           }
+          arrange(connection, screen, clients, current_workspace);
+        }
+        else if(sym == XK_h) {
+          if(diff_percent <= -40) break;
+          
+          int cnt_windows = 0;
+          for(auto c: clients) if(c.tag == current_workspace) cnt_windows++;
+          if(cnt_windows <= 1) break;
+
+          diff_percent -= 5;
+          std::cout << diff_percent << '\n';
+          arrange(connection, screen, clients, current_workspace);
+        } 
+        else if(sym == XK_l) {
+          if(diff_percent >= 40) break;
+          
+          int cnt_windows = 0;
+          for(auto c: clients) if(c.tag == current_workspace) cnt_windows++;
+          if(cnt_windows <= 1) break;
+
+          diff_percent += 5;
           arrange(connection, screen, clients, current_workspace);
         }
         else if(sym == XF86XK_AudioRaiseVolume) {
