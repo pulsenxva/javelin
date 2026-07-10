@@ -44,7 +44,7 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
   } else {
     Client& master = cur_clients[0];
 
-    int dif = diff_percent*screen->width_in_pixels/200;
+    int dif = diff_percent*screen->width_in_pixels/100;
 
     master.x = 0;
     master.y = 0;
@@ -62,9 +62,6 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
     for(auto& c: ri) {
       c.x = master.w + BORDER;
       c.w = screen->width_in_pixels - master.w - 2*BORDER;
-
-      //c.x = screen->width_in_pixels/2 + BORDER;
-      //c.w = master.w - 2*BORDER;
       c.y = cur_y;
       c.h = common_height;
       cur_y += common_height+2*BORDER;
@@ -77,11 +74,16 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
 }
 
 void spawn(const char* cmd) {
-  if(fork() == 0) {
-    setsid();
-    execlp(cmd, cmd, NULL);
-    _exit(1);
+  pid_t pid = fork();
+  if(pid == 0) {
+    if(fork() == 0) {
+      setsid();
+      execlp(cmd, cmd, NULL);
+      _exit(1);
+    }
+    _exit(0);
   }
+  waitpid(pid, NULL, 0);
 }
 
 void spawn_args(const char *file, char *const argv[]) {
@@ -167,8 +169,6 @@ int main(int argc, char *argv[]) {
   xcb_connection_t *connection = xcb_connect(NULL, &screen_number);
   assert(!xcb_connection_has_error(connection));
   xcb_screen_t *screen = xcb_aux_get_screen(connection, screen_number);
-
-  signal(SIGCHLD, SIG_IGN);
 
   xcb_atom_t wm_protocols;
   xcb_atom_t wm_delete_window;
