@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <csignal>
+#include <sys/wait.h>
 
 #include <xcb/xcb.h>
 #include <xcb/xcb_event.h>
@@ -43,7 +44,7 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
   } else {
     Client& master = cur_clients[0];
 
-    int dif = diff_percent*screen->width_in_pixels/100;
+    int dif = diff_percent*screen->width_in_pixels/200;
 
     master.x = 0;
     master.y = 0;
@@ -90,6 +91,20 @@ void spawn_args(const char *file, char *const argv[]) {
     _exit(1);
   }
 }
+
+bool rebuild(const char *project_dir) {
+  pid_t pid = fork();
+  if(pid == 0) {
+    chdir(project_dir);
+    execlp("make", "make", NULL);
+    _exit(1);
+  }
+
+  int status;
+  waitpid(pid, &status, 0);
+  return WIFEXITED(status) && WEXITSTATUS(status) == 0;
+}
+
 
 void close_window(xcb_connection_t *connection, xcb_window_t window,
                    xcb_atom_t wm_protocols, xcb_atom_t wm_delete_window) {
@@ -144,9 +159,10 @@ void move_to_workspace(xcb_connection_t *connection, Client &c,
   c.tag = workspace;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
   int screen_number;
   bool is_running = true;
+  char *wm_path = argv[0];
 
   xcb_connection_t *connection = xcb_connect(NULL, &screen_number);
   assert(!xcb_connection_has_error(connection));
@@ -191,6 +207,11 @@ int main() {
   xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4,
       *keycode_y, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
   free(keycode_y);
+
+  xcb_keycode_t *keycode_ysh = xcb_key_symbols_get_keycode(keysyms, XK_Y);
+  xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4 | XCB_MOD_MASK_SHIFT,
+      *keycode_ysh, XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC);
+  free(keycode_ysh);
 
   xcb_keycode_t *keycode_d = xcb_key_symbols_get_keycode(keysyms, XK_D);
   xcb_grab_key(connection, 1, screen->root, XCB_MOD_MASK_4,
@@ -239,6 +260,36 @@ int main() {
   int current_workspace = 1;
   std::set<xcb_window_t> unmaps;
 
+  xcb_query_tree_cookie_t qt_cookie = xcb_query_tree(connection, screen->root);
+  xcb_query_tree_reply_t *qt_reply = xcb_query_tree_reply(connection, qt_cookie, NULL);
+
+  if(qt_reply) {
+    xcb_window_t *existing = xcb_query_tree_children(qt_reply);
+    int n = xcb_query_tree_children_length(qt_reply);
+
+    for(int i = 0; i < n; i++) {
+      xcb_get_window_attributes_cookie_t attr_cookie = xcb_get_window_attributes(connection, existing[i]);
+      xcb_get_window_attributes_reply_t *attr = xcb_get_window_attributes_reply(connection, attr_cookie, NULL);
+
+      if(attr && attr->map_state == XCB_MAP_STATE_VIEWABLE && !attr->override_redirect) {
+        uint32_t enter_mask = XCB_EVENT_MASK_ENTER_WINDOW;
+        xcb_change_window_attributes(connection, existing[i], XCB_CW_EVENT_MASK, &enter_mask);
+
+        Client c;
+        c.window = existing[i];
+        c.tag = current_workspace;
+        clients.push_back(c);
+
+        xcb_configure_window(connection, existing[i], XCB_CONFIG_WINDOW_BORDER_WIDTH, &BORDER);
+      }
+      free(attr);
+    }
+    free(qt_reply);
+  }
+
+  arrange(connection, screen, clients, current_workspace);
+  xcb_flush(connection);
+
   xcb_generic_event_t *generic_event;
   while(is_running) {
     generic_event = xcb_wait_for_event(connection);
@@ -285,10 +336,19 @@ int main() {
           close_window(connection, focused_window, wm_protocols, wm_delete_window);
         }
         else if(sym == XK_Return) {
-          spawn("xterm");
+          spawn("alacritty");
         }
-        else if(sym == XK_y) {
+        else if(sym == XK_y && !(e->state &XCB_MOD_MASK_SHIFT)) {
           is_running = false;
+        }
+        else if(sym == XK_y && (e->state &XCB_MOD_MASK_SHIFT)) {
+          if(rebuild("/home/jonathan/fun/javelin")) {
+            xcb_disconnect(connection);
+            execlp(wm_path, wm_path, NULL);
+            perror("execlp failed to restart wm");
+            exit(1);
+          } else std::cerr << "Build failed, keeping current WM running\n";
+          break;
         }
         else if(sym == XK_d) {
           spawn("dmenu_run");
@@ -381,6 +441,26 @@ int main() {
       case XCB_ENTER_NOTIFY: {
         xcb_enter_notify_event_t *e = (xcb_enter_notify_event_t*) generic_event;
         focus_window(connection, focused_window, e->event);
+        break;
+      }
+
+      case XCB_CONFIGURE_REQUEST: {
+        xcb_configure_request_event_t *e = (xcb_configure_request_event_t*) generic_event;
+
+        int values[7];
+        int i = 0;
+        int mask = 0;
+
+        if(e->value_mask & XCB_CONFIG_WINDOW_X) { mask |= XCB_CONFIG_WINDOW_X; values[i++] = e->x; }
+        if(e->value_mask & XCB_CONFIG_WINDOW_Y) { mask |= XCB_CONFIG_WINDOW_Y; values[i++] = e->y; }
+        if(e->value_mask & XCB_CONFIG_WINDOW_WIDTH) { mask |= XCB_CONFIG_WINDOW_WIDTH; values[i++] = e->width; }
+        if(e->value_mask & XCB_CONFIG_WINDOW_HEIGHT) { mask |= XCB_CONFIG_WINDOW_HEIGHT; values[i++] = e->height; }
+        if(e->value_mask & XCB_CONFIG_WINDOW_BORDER_WIDTH) { mask |= XCB_CONFIG_WINDOW_BORDER_WIDTH; values[i++] = e->border_width; }
+        if(e->value_mask & XCB_CONFIG_WINDOW_SIBLING) { mask |= XCB_CONFIG_WINDOW_SIBLING; values[i++] = e->sibling; }
+        if(e->value_mask & XCB_CONFIG_WINDOW_STACK_MODE) { mask |= XCB_CONFIG_WINDOW_STACK_MODE; values[i++] = e->stack_mode; }
+
+        xcb_configure_window(connection, e->window, mask, values);
+        xcb_flush(connection);
         break;
       }
     }
