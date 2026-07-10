@@ -60,8 +60,8 @@ void arrange(xcb_connection_t *connection, xcb_screen_t *screen, std::vector<Cli
     int common_height = (screen->height_in_pixels - 2*BORDER*(int)ri.size())/(int)ri.size();
     int cur_y = 0;
     for(auto& c: ri) {
-      c.x = master.w + BORDER;
-      c.w = screen->width_in_pixels - master.w - 2*BORDER;
+      c.x = master.w + 2*BORDER;
+      c.w = screen->width_in_pixels - master.w - 4*BORDER;
       c.y = cur_y;
       c.h = common_height;
       cur_y += common_height+2*BORDER;
